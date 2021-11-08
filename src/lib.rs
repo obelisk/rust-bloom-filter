@@ -12,7 +12,11 @@
 use bit_vec::BitVec;
 #[cfg(feature = "random")]
 use getrandom::getrandom;
-use siphasher::sip::SipHasher13;
+//use siphasher::sip::SipHasher13;
+use std::convert::TryInto;
+
+use xxhrs::XXH3_64;
+
 use std::cmp;
 use std::f64;
 use std::hash::{Hash, Hasher};
@@ -33,17 +37,17 @@ pub mod reexports {
 /// Bloom filter structure
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(crate = "serde"))]
-#[derive(Clone, Debug)]
-pub struct Bloom<T: ?Sized> {
+#[derive(Clone)]
+pub struct Bloom<'a, T: ?Sized> {
     bit_vec: BitVec,
     bitmap_bits: u64,
     k_num: u32,
-    sips: [SipHasher13; 2],
+    sips: [XXH3_64<'a>; 2],
 
     _phantom: PhantomData<T>,
 }
 
-impl<T: ?Sized> Bloom<T> {
+impl<T: ?Sized> Bloom<'_, T> {
     /// Create a new bloom filter structure.
     /// bitmap_size is the size in bytes (not bits) that will be allocated in memory
     /// items_count is an estimation of the maximum number of items to store.
@@ -53,11 +57,9 @@ impl<T: ?Sized> Bloom<T> {
         let bitmap_bits = (bitmap_size as u64) * 8u64;
         let k_num = Self::optimal_k_num(bitmap_bits, items_count);
         let bitmap = BitVec::from_elem(bitmap_bits as usize, false);
-        let mut k1 = [0u8; 16];
-        let mut k2 = [0u8; 16];
-        k1.copy_from_slice(&seed[0..16]);
-        k2.copy_from_slice(&seed[16..32]);
-        let sips = [Self::sip_new(&k1), Self::sip_new(&k2)];
+        let s1 = u64::from_be_bytes(seed[0..8].try_into().unwrap());
+        let s2 = u64::from_be_bytes(seed[8..16].try_into().unwrap());
+        let sips = [XXH3_64::with_seed(s1), XXH3_64::with_seed(s2)];
         Self {
             bit_vec: bitmap,
             bitmap_bits,
@@ -100,11 +102,11 @@ impl<T: ?Sized> Bloom<T> {
         bit_vec: BitVec,
         bitmap_bits: u64,
         k_num: u32,
-        sip_keys: [(u64, u64); 2],
+        seeds: [u64; 2],
     ) -> Self {
         let sips = [
-            SipHasher13::new_with_keys(sip_keys[0].0, sip_keys[0].1),
-            SipHasher13::new_with_keys(sip_keys[1].0, sip_keys[1].1),
+            XXH3_64::with_seed(seeds[0]),
+            XXH3_64::with_seed(seeds[1]),
         ];
         Self {
             bit_vec,
@@ -117,14 +119,14 @@ impl<T: ?Sized> Bloom<T> {
 
     /// Create a bloom filter structure with an existing state given as a byte array.
     /// The state is assumed to be retrieved from an existing bloom filter.
-    pub fn from_existing(
+    /*pub fn from_existing(
         bytes: &[u8],
         bitmap_bits: u64,
         k_num: u32,
         sip_keys: [(u64, u64); 2],
     ) -> Self {
         Self::from_bit_vec(BitVec::from_bytes(bytes), bitmap_bits, k_num, sip_keys)
-    }
+    }*/
 
     /// Compute a recommended bitmap size for items_count items
     /// and a fp_p rate of false positives.
@@ -204,9 +206,9 @@ impl<T: ?Sized> Bloom<T> {
     }
 
     /// Return the keys used by the sip hasher
-    pub fn sip_keys(&self) -> [(u64, u64); 2] {
-        [self.sips[0].keys(), self.sips[1].keys()]
-    }
+    //pub fn sip_keys(&self) -> [(u64, u64); 2] {
+    //    [self.sips[0].keys(), self.sips[1].keys()]
+    //}
 
     #[allow(dead_code)]
     fn optimal_k_num(bitmap_bits: u64, items_count: usize) -> u32 {
@@ -235,11 +237,6 @@ impl<T: ?Sized> Bloom<T> {
     /// Clear all of the bits in the filter, removing all keys from the set
     pub fn clear(&mut self) {
         self.bit_vec.clear()
-    }
-
-    #[inline]
-    fn sip_new(key: &[u8; 16]) -> SipHasher13 {
-        SipHasher13::new_with_key(key)
     }
 }
 
@@ -285,11 +282,12 @@ fn bloom_test_load() {
     original.set(&k);
     assert!(original.check(&k) == true);
 
-    let cloned = Bloom::from_existing(
+    /*let cloned = Bloom::from_existing(
         &original.bitmap(),
         original.number_of_bits(),
         original.number_of_hash_functions(),
         original.sip_keys(),
     );
     assert!(cloned.check(&k) == true);
+    */
 }
