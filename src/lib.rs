@@ -216,7 +216,7 @@ impl<T: ?Sized> Bloom<T> {
         cmp::max(k_num, 1)
     }
 
-    fn bloom_hash(&self, hashes: &mut [u64; 2], item: &T, k_i: u32) -> u64
+    pub fn bloom_hash(&self, hashes: &mut [u64; 2], item: &T, k_i: u32) -> u64
     where
         T: Hash,
     {
